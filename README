@@ -1,4 +1,11 @@
-Videotransformer
-====================
+# Videotransformer #
+
 This repository contains tools to modify videos.
 
+## videotransformer ##
+Main tool, implements the following things:
+
+* Resizing
+* Horizontal and vertical flipping
+* Conversion to grayscale
+* Linear speedup via frame dropping
