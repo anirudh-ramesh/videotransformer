@@ -8,3 +8,4 @@ core*
 *.pyc
 .project
 .pydevproject
+*.dll
