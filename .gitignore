@@ -1,0 +1,10 @@
+core*
+.*swp
+*~
+*.bak
+*.Bak
+*.so
+*.o
+*.pyc
+.project
+.pydevproject
