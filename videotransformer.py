@@ -17,8 +17,9 @@ def main():
     parser.add_argument('--grey', action='store_true', help='Convert to greyscale')
     parser.add_argument('--mirrorh', action='store_true', help='Mirror image horizontally')
     parser.add_argument('--mirrorv', action='store_true', help='Mirror image vertically')
-    parser.add_argument('--noise-gaussian', default='0,0', metavar='M,D', help='Add gaussian noise')
-    parser.add_argument('--noise-saltpepper', default='0,0', metavar='M,D', help='Add gaussian noise')
+    parser.add_argument('--noise-gaussian', default='0,0', metavar='M,D', help='Add gaussian noise (mean, stdev)')
+    parser.add_argument('--noise-saltpepper', default='0,0', metavar='LT,HT', help='Add gaussian noise (low thresh, high thresh)')
+    parser.add_argument('--invert-channels', default='n,n,n', metavar='?,?,?', help='Invert channel RGB (y/n)')
     parser.add_argument('--speedup', type=int, default=1, choices=xrange(1,5), help='Speed-up playback (integer factor)')
     args = parser.parse_args()
     print repr(args)
@@ -43,6 +44,12 @@ def main():
         noise_saltpepper = [int(i) for i in noise_saltpepper]
     except ValueError:
         noise_saltpepper = (0.,0.)
+        
+    try:
+        channel_inversions  = args.invert_channels.split(',')
+        channel_inversions = [i == 'y' for i in channel_inversions]
+    except ValueError:
+        channel_inversions = [False, False, False]
     ###########################
 
     cap = cv2.VideoCapture(args.vid_in)
@@ -97,10 +104,6 @@ def main():
             outputImage = cv2.resize(outputImage, tuple(outputFrameDimensions))
 
         #
-        if args.grey:
-            outputImage = cv2.cvtColor(outputImage, cv2.cv.CV_BGR2GRAY)
-
-        #
         if args.mirrorh and args.mirrorv:
             outputImage = cv2.flip(outputImage, -1)
         elif args.mirrorh:
@@ -136,7 +139,24 @@ def main():
             chans[2] = cv2.subtract(chans[2], black)
             chans[2] = cv2.add(chans[2], white)
             outputImage = cv2.merge(chans)
+        
+        #
+        if any(channel_inversions):
+            chans = cv2.split(outputImage)
             
+            #data is stored BGR
+            if channel_inversions[2]:
+                chans[0] = 255 - chans[0]
+            if channel_inversions[1]:
+                chans[1] = 255 - chans[1]
+            if channel_inversions[0]:
+                chans[2] = 255 - chans[2]
+            outputImage = cv2.merge(chans)
+
+        #
+        if args.grey:
+            outputImage = cv2.cvtColor(outputImage, cv2.cv.CV_BGR2GRAY)
+
         #
         if args.speedup > 1 and i % args.speedup > 0:
             keptFrame = False
