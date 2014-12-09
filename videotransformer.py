@@ -13,7 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description='Process video files')
     parser.add_argument('vid_in', help='Input video file')
     parser.add_argument('--vid_out',  default='', help='Output video file')
-    parser.add_argument('--size', default='0x0', help='WxH')
+    parser.add_argument('--resize', default='0x0', help='WxH')
     parser.add_argument('--grey', action='store_true', help='Convert to greyscale')
     parser.add_argument('--mirrorh', action='store_true', help='Mirror image horizontally')
     parser.add_argument('--mirrorv', action='store_true', help='Mirror image vertically')
@@ -26,7 +26,7 @@ def main():
 
     #arguments that require modifications
     try:
-        outputFrameDimensions = args.size.split('x')
+        outputFrameDimensions = args.resize.split('x')
         outputFrameDimensions = [int(i) for i in outputFrameDimensions]
         
     except ValueError:
