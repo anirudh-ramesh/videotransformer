@@ -3,6 +3,7 @@
 import cv2
 import sys
 import argparse
+import random
 import numpy as np
 
 
@@ -21,6 +22,7 @@ def main():
     parser.add_argument('--noise-saltpepper', default='0,0', metavar='LT,HT', help='Add gaussian noise (low thresh, high thresh)')
     parser.add_argument('--invert-channels', default='n,n,n', metavar='?,?,?', help='Invert channel RGB (y/n)')
     parser.add_argument('--speedup', type=int, default=1, choices=xrange(1,5), help='Speed-up playback (integer factor)')
+    parser.add_argument('--rand-frame-drop', type=int, default=0, metavar='PCT', help='Drop frames randomly (uniform(0,100) < PCT)')
     args = parser.parse_args()
     print repr(args)
 
@@ -50,6 +52,11 @@ def main():
         channel_inversions = [i == 'y' for i in channel_inversions]
     except ValueError:
         channel_inversions = [False, False, False]
+        
+    dropped_frame_factor = args.rand_frame_drop
+    if not 0 < args.rand_frame_drop <= 100:
+        dropped_frame_factor = 0
+        
     ###########################
 
     cap = cv2.VideoCapture(args.vid_in)
@@ -156,6 +163,9 @@ def main():
         #
         if args.grey:
             outputImage = cv2.cvtColor(outputImage, cv2.cv.CV_BGR2GRAY)
+
+        #
+        keptFrame = random.randint(0, 100) >= dropped_frame_factor
 
         #
         if args.speedup > 1 and i % args.speedup > 0:
