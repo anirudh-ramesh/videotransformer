@@ -16,16 +16,26 @@ def main():
     parser.add_argument('--grey', action='store_true', help='Convert to greyscale')
     parser.add_argument('--mirrorh', action='store_true', help='Mirror image horizontally')
     parser.add_argument('--mirrorv', action='store_true', help='Mirror image vertically')
+    parser.add_argument('--noise-gaussian', default='0,0', metavar='M,D', help='Add gaussian noise')
     parser.add_argument('--speedup', type=int, default=1, choices=xrange(1,5), help='Speed-up playback (integer factor)')
     args = parser.parse_args()
     print repr(args)
 
+    #arguments that require modifications
     try:
-        outputFrameWidth = int(args.size.split('x')[0])
-        outputFrameHeight = int(args.size.split('x')[1])
+        outputFrameDimensions = args.size.split('x')
+        outputFrameDimensions = [int(i) for i in outputFrameDimensions]
+        
     except ValueError:
-        outputFrameWidth = 0
-        outputFrameHeight = 0
+        outputFrameDimensions = [0,0]
+
+        
+    try:
+        noise_gaussian = args.noise_gaussian.split(',')
+        noise_gaussian = [int(i) for i in noise_gaussian]
+    except ValueError:
+        noise_gaussian = (0.,0.)
+    ###########################
 
     cap = cv2.VideoCapture(args.vid_in)
     if not cap.isOpened():
@@ -38,16 +48,16 @@ def main():
     INPUT_FRAME_HEIGHT = int(cap.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT))
     sys.stderr.write('In: fps={} frames={} {}x{}\n'.format(FPS, NB_FRAMES, INPUT_FRAME_WIDTH, INPUT_FRAME_HEIGHT))
 
-    outputFrameHeight = outputFrameHeight if outputFrameHeight > 0 else INPUT_FRAME_HEIGHT
-    outputFrameWidth = outputFrameWidth if outputFrameWidth > 0 else INPUT_FRAME_WIDTH
-    sys.stderr.write('Out: fps={} frames={} {}x{}\n'.format(FPS, NB_FRAMES, outputFrameWidth, outputFrameHeight))
+    outputFrameDimensions[0] = outputFrameDimensions[0] if outputFrameDimensions[0] > 0 else INPUT_FRAME_WIDTH
+    outputFrameDimensions[1] = outputFrameDimensions[1] if outputFrameDimensions[1] > 0 else INPUT_FRAME_HEIGHT
+    sys.stderr.write('Out: fps={} frames={} {}x{}\n'.format(FPS, NB_FRAMES, outputFrameDimensions[0], outputFrameDimensions[1]))
 
     if not FPS*NB_FRAMES*INPUT_FRAME_WIDTH*INPUT_FRAME_HEIGHT:
         sys.stderr.write("Video doesn't appear to be supported.\n")
         exit(1)
 
     if args.vid_out:
-        sink = cv2.VideoWriter(args.vid_out, cv2.cv.FOURCC('M', 'J', 'P', 'G'), FPS, (outputFrameWidth,outputFrameHeight), isColor=not args.grey)
+        sink = cv2.VideoWriter(args.vid_out, cv2.cv.FOURCC('M', 'J', 'P', 'G'), FPS, (outputFrameDimensions[0],outputFrameDimensions[1]), isColor=not args.grey)
         if not sink.isOpened():
             sys.stderr.write("Couldn't open output video file.\n")
             exit(1)
@@ -75,8 +85,8 @@ def main():
         outputImage = inputImage
 
         #
-        if INPUT_FRAME_HEIGHT != outputFrameHeight or INPUT_FRAME_WIDTH != outputFrameWidth:
-            outputImage = cv2.resize(outputImage, (outputFrameWidth, outputFrameHeight))
+        if INPUT_FRAME_WIDTH != outputFrameDimensions[0] or INPUT_FRAME_HEIGHT != outputFrameDimensions[1]:
+            outputImage = cv2.resize(outputImage, tuple(outputFrameDimensions))
 
         #
         if args.grey:
@@ -90,6 +100,16 @@ def main():
         elif args.mirrorv:
             outputImage = cv2.flip(outputImage, 0)
 
+        #
+        if noise_gaussian[0] and noise_gaussian[1]:
+            
+            chans = cv2.split(outputImage)
+            noiseImage = chans[0].copy()
+            cv2.randn(noiseImage,noise_gaussian[0],noise_gaussian[1])
+            chans[0] = cv2.add(chans[0], noiseImage)
+            chans[1] = cv2.add(chans[1], noiseImage)
+            chans[2] = cv2.add(chans[2], noiseImage)
+            outputImage = cv2.merge(chans)
         #
         if args.speedup > 1 and i % args.speedup > 0:
             keptFrame = False
