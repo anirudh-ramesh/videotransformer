@@ -17,6 +17,7 @@ def main():
     parser = argparse.ArgumentParser(description='Process video files')
     parser.add_argument('video_input', help='Input video file')
     parser.add_argument('--video-output',  default='', help='Output video file')
+    parser.add_argument('--seek',  type=int, default=0, help='Start at specific frame')
     parser.add_argument('--resize', default='0x0', help='WxH')
     parser.add_argument('--grey', action='store_true', help='Convert to greyscale')
     parser.add_argument('--mirrorh', action='store_true', help='Mirror image horizontally')
@@ -77,7 +78,10 @@ def main():
     INPUT_FRAME_HEIGHT = int(cap.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT))
     sys.stderr.write('In: fps={} frames={} {}x{}\n'.format(FPS, NB_FRAMES, INPUT_FRAME_WIDTH, INPUT_FRAME_HEIGHT))
     
-    cap.set(cv2.cv.CV_CAP_PROP_POS_FRAMES, 30)
+    if 0 <= args.seek < NB_FRAMES:
+        cap.set(cv2.cv.CV_CAP_PROP_POS_FRAMES, args.seek)
+    else:
+        sys.stderr.write('Could not seek past end of video\n')
 
     outputFrameDimensions[0] = outputFrameDimensions[0] if outputFrameDimensions[0] > 0 else INPUT_FRAME_WIDTH
     outputFrameDimensions[1] = outputFrameDimensions[1] if outputFrameDimensions[1] > 0 else INPUT_FRAME_HEIGHT
