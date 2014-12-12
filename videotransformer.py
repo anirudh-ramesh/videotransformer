@@ -18,6 +18,7 @@ def main():
     parser.add_argument('video_input', help='Input video file')
     parser.add_argument('--video-output',  default='', help='Output video file')
     parser.add_argument('--seek',  type=int, default=0, help='Start at specific frame')
+    parser.add_argument('--batch',  action='store_true', help='Do not show GUI')
     parser.add_argument('--resize', default='0x0', help='WxH')
     parser.add_argument('--grey', action='store_true', help='Convert to greyscale')
     parser.add_argument('--mirrorh', action='store_true', help='Mirror image horizontally')
@@ -97,25 +98,26 @@ def main():
             sys.stderr.write("Couldn't open output video file.\n")
             exit(1)
 
-    cv2.namedWindow('Original')
-    cv2.namedWindow('Modified')
-
-    cv2.createTrackbar('Progress', 'Original', 0, NB_FRAMES, nop)
-    cv2.createTrackbar('Progress', 'Modified', 0, NB_FRAMES, nop)
-
-    emptySubpix = subPix = [[[] for h in xrange(outputFrameDimensions[1])] for w in xrange(outputFrameDimensions[0])]
+    if not args.batch:
+        cv2.namedWindow('Original')
+        cv2.namedWindow('Modified')
+        cv2.createTrackbar('Progress', 'Original', 0, NB_FRAMES, nop)
+        cv2.createTrackbar('Progress', 'Modified', 0, NB_FRAMES, nop)
 
     for i in xrange(NB_FRAMES):
         keptFrame = True
 
-        cv2.setTrackbarPos('Progress', 'Original', i)
-        cv2.setTrackbarPos('Progress', 'Modified', i)
+        if not args.batch:
+            cv2.setTrackbarPos('Progress', 'Original', i)
+            cv2.setTrackbarPos('Progress', 'Modified', i)
+
         (ret,inputImage) = cap.read()
         if not ret:
             sys.stderr.write("Couldn't decode frame.\n")
             break
 
-        cv2.imshow('Original', inputImage)
+        if not args.batch:
+            cv2.imshow('Original', inputImage)
 
 
         #Image transformations
@@ -253,7 +255,8 @@ def main():
 
         if keptFrame:
             modifiedImage = outputImage.copy()
-            cv2.imshow('Modified', outputImage)
+            if not args.batch:
+                cv2.imshow('Modified', outputImage)
 
             if args.video_output:
                 sink.write(modifiedImage)
