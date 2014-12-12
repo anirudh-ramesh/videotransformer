@@ -10,10 +10,13 @@ import numpy as np
 def nop(*args):
     pass
 
+def normalPDF(sigma, mu, x):
+    return 1/(sigma * np.sqrt(2*np.pi)) * np.exp(-(x-mu)**2 / (2*(sigma**2)))
+
 def main():
     parser = argparse.ArgumentParser(description='Process video files')
-    parser.add_argument('vid_in', help='Input video file')
-    parser.add_argument('--vid_out',  default='', help='Output video file')
+    parser.add_argument('video_input', help='Input video file')
+    parser.add_argument('--video-output',  default='', help='Output video file')
     parser.add_argument('--resize', default='0x0', help='WxH')
     parser.add_argument('--grey', action='store_true', help='Convert to greyscale')
     parser.add_argument('--mirrorh', action='store_true', help='Mirror image horizontally')
@@ -23,6 +26,7 @@ def main():
     parser.add_argument('--invert-channels', default='n,n,n', metavar='?,?,?', help='Invert channel RGB (y/n)')
     parser.add_argument('--speedup', type=int, default=1, choices=xrange(1,5), help='Speed-up playback (integer factor)')
     parser.add_argument('--rand-frame-drop', type=int, default=0, metavar='PCT', help='Drop frames randomly (uniform(0,100) < PCT)')
+    parser.add_argument('--smudge', action='store_true', help='Activate smudge generation')
     args = parser.parse_args()
     print repr(args)
 
@@ -56,10 +60,13 @@ def main():
     dropped_frame_factor = args.rand_frame_drop
     if not 0 < args.rand_frame_drop <= 100:
         dropped_frame_factor = 0
-        
+    
+    if args.smudge and not args.grey:
+        sys.stderr.write("ERROR: --smudge can only be used in combination with --grey\n")
+        exit(1)
     ###########################
 
-    cap = cv2.VideoCapture(args.vid_in)
+    cap = cv2.VideoCapture(args.video_input)
     if not cap.isOpened():
         sys.stderr.write("Couldn't open video file.\n")
         exit(1)
@@ -69,6 +76,8 @@ def main():
     INPUT_FRAME_WIDTH = int(cap.get(cv2.cv.CV_CAP_PROP_FRAME_WIDTH))
     INPUT_FRAME_HEIGHT = int(cap.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT))
     sys.stderr.write('In: fps={} frames={} {}x{}\n'.format(FPS, NB_FRAMES, INPUT_FRAME_WIDTH, INPUT_FRAME_HEIGHT))
+    
+    cap.set(cv2.cv.CV_CAP_PROP_POS_FRAMES, 30)
 
     outputFrameDimensions[0] = outputFrameDimensions[0] if outputFrameDimensions[0] > 0 else INPUT_FRAME_WIDTH
     outputFrameDimensions[1] = outputFrameDimensions[1] if outputFrameDimensions[1] > 0 else INPUT_FRAME_HEIGHT
@@ -78,8 +87,8 @@ def main():
         sys.stderr.write("Video doesn't appear to be supported.\n")
         exit(1)
 
-    if args.vid_out:
-        sink = cv2.VideoWriter(args.vid_out, cv2.cv.FOURCC('M', 'J', 'P', 'G'), FPS, (outputFrameDimensions[0],outputFrameDimensions[1]), isColor=not args.grey)
+    if args.video_output:
+        sink = cv2.VideoWriter(args.video_output, cv2.cv.FOURCC('M', 'J', 'P', 'G'), FPS, (outputFrameDimensions[0],outputFrameDimensions[1]), isColor=not args.grey)
         if not sink.isOpened():
             sys.stderr.write("Couldn't open output video file.\n")
             exit(1)
@@ -89,6 +98,8 @@ def main():
 
     cv2.createTrackbar('Progress', 'Original', 0, NB_FRAMES, nop)
     cv2.createTrackbar('Progress', 'Modified', 0, NB_FRAMES, nop)
+
+    emptySubpix = subPix = [[[] for h in xrange(outputFrameDimensions[1])] for w in xrange(outputFrameDimensions[0])]
 
     for i in xrange(NB_FRAMES):
         keptFrame = True
@@ -104,7 +115,7 @@ def main():
 
 
         #Image transformations
-        outputImage = inputImage
+        outputImage = inputImage.copy()
 
         #
         if INPUT_FRAME_WIDTH != outputFrameDimensions[0] or INPUT_FRAME_HEIGHT != outputFrameDimensions[1]:
@@ -163,6 +174,68 @@ def main():
         #
         if args.grey:
             outputImage = cv2.cvtColor(outputImage, cv2.cv.CV_BGR2GRAY)
+            
+            if args.smudge:
+                oPoint = np.array([290, 50])
+                oVector = np.array([-0.707,-0.707]) #should be a unit vector
+                maxDist = 75 #px
+                gain = 500
+                normSigma = 15
+                normMu = 0
+                
+                #create subpixel array
+                subPix = [[[] for h in xrange(outputFrameDimensions[1])] for w in xrange(outputFrameDimensions[0])]
+                 
+                destPix = outputImage.copy()
+                destPix *= 0
+ 
+                for w in xrange(outputFrameDimensions[0]):
+                    cv2.waitKey(1)
+                    for h in xrange(outputFrameDimensions[1]):
+                        dist = np.linalg.norm(oPoint - np.array([w,h]))
+                        if dist > maxDist:
+                            subPix[w][h].append(outputImage[h][w]) #inverted image storage
+                            continue
+                         
+                        pxMovementMag = gain * normalPDF(normSigma, normMu, dist)
+                        pxMovement = oVector * np.array([pxMovementMag, pxMovementMag])
+                        dest = np.array([w,h]) + pxMovement
+                        
+ 
+                        if 0 <= dest[0] < outputFrameDimensions[0] and 0 <= dest[1] < outputFrameDimensions[1]: 
+                            subPix[int(dest[0])][int(dest[1])].append(np.uint32(outputImage[h][w])) #inverted image storage
+                     
+                #flatten output image
+                for w in xrange(outputFrameDimensions[0]):
+                    for h in xrange(outputFrameDimensions[1]):
+                        a = subPix[w][h]
+                        
+                        if len(a) > 0:
+                            destPix[h][w] = np.uint8(reduce(lambda x, y: x + y, a) / len(a))
+                                    
+                #fill in the blanks in the image
+                #obtain value from neighboring pixels
+                
+                for w in xrange(outputFrameDimensions[0]):
+                    for h in xrange(outputFrameDimensions[1]):
+                        total = 0
+                        count = 0
+                        if len(subPix[w][h]) == 0:
+                            for w1 in xrange(w-3, w+4):
+                                for h1 in xrange(h-3, h+4):
+                                    if 0 <= w1 < outputFrameDimensions[0] and 0 <= h1 < outputFrameDimensions[1] and len(subPix[w1][h1]) != 0:
+                                        count = count + 1
+                                        total += destPix[h1][w1]
+                            avg = (total / count) if count > 0 else 0
+                            destPix[h][w] = np.uint8(avg)
+                                
+                                    
+                                
+                                    
+                                    
+ 
+                outputImage = destPix
+                #cv2.circle(outputImage, tuple(oPoint), 5, 255)
 
         #
         keptFrame = random.randint(0, 100) >= dropped_frame_factor
@@ -175,10 +248,11 @@ def main():
         ############################################
 
         if keptFrame:
+            modifiedImage = outputImage.copy()
             cv2.imshow('Modified', outputImage)
 
-            if args.vid_out:
-                sink.write(outputImage)
+            if args.video_output:
+                sink.write(modifiedImage)
 
 
         k = cv2.waitKey(1)
