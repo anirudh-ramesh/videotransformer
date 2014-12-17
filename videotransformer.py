@@ -20,6 +20,7 @@ def main():
     parser.add_argument('--seek',  type=int, default=0, help='Start at specific frame')
     parser.add_argument('--batch',  action='store_true', help='Do not show GUI')
     parser.add_argument('--resize', default='0x0', help='WxH')
+    parser.add_argument('--reverse', action='store_true', help='Process video in reverse')
     parser.add_argument('--grey', action='store_true', help='Convert to greyscale')
     parser.add_argument('--mirrorh', action='store_true', help='Mirror image horizontally')
     parser.add_argument('--mirrorv', action='store_true', help='Mirror image vertically')
@@ -66,6 +67,10 @@ def main():
     if args.smudge and not args.grey:
         sys.stderr.write("ERROR: --smudge can only be used in combination with --grey\n")
         exit(1)
+        
+    if args.reverse and not args.seek:
+        sys.stderr.write("ERROR: --reverse is incompatible with --seek at this time\n")
+        exit(1)
     ###########################
 
     cap = cv2.VideoCapture(args.video_input)
@@ -111,6 +116,9 @@ def main():
             cv2.setTrackbarPos('Progress', 'Original', i)
             cv2.setTrackbarPos('Progress', 'Modified', i)
 
+        if args.reverse:
+            cap.set(cv2.cv.CV_CAP_PROP_POS_FRAMES, NB_FRAMES-i-1)
+        
         (ret,inputImage) = cap.read()
         if not ret:
             sys.stderr.write("Couldn't decode frame.\n")
