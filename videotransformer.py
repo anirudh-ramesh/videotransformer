@@ -68,7 +68,7 @@ def main():
         sys.stderr.write("ERROR: --smudge can only be used in combination with --grey\n")
         exit(1)
         
-    if args.reverse and not args.seek:
+    if args.reverse and args.seek:
         sys.stderr.write("ERROR: --reverse is incompatible with --seek at this time\n")
         exit(1)
     ###########################
@@ -109,6 +109,10 @@ def main():
         cv2.createTrackbar('Progress', 'Original', 0, NB_FRAMES, nop)
         cv2.createTrackbar('Progress', 'Modified', 0, NB_FRAMES, nop)
 
+    TEMPORAL_LEN = 25
+    subPix = [[[[] for h in xrange(outputFrameDimensions[1])] for w in xrange(outputFrameDimensions[0])] for t in xrange(-TEMPORAL_LEN, TEMPORAL_LEN+1)]
+    singularities = []
+    
     for i in xrange(NB_FRAMES):
         keptFrame = True
 
@@ -186,70 +190,106 @@ def main():
             outputImage = cv2.merge(chans)
 
         #
+        destPix = None
         if args.grey:
             outputImage = cv2.cvtColor(outputImage, cv2.cv.CV_BGR2GRAY)
             
             if args.smudge:
-                oPoint = np.array([290, 50])
-                oVector = np.array([-0.707,-0.707]) #should be a unit vector
-                maxDist = 75 #px
-                gain = 500
-                normSigma = 15
-                normMu = 0
-                
-                #create subpixel array
-                subPix = [[[] for h in xrange(outputFrameDimensions[1])] for w in xrange(outputFrameDimensions[0])]
-                 
-                destPix = outputImage.copy()
-                destPix *= 0
- 
-                for w in xrange(outputFrameDimensions[0]):
-                    cv2.waitKey(1)
-                    for h in xrange(outputFrameDimensions[1]):
-                        dist = np.linalg.norm(oPoint - np.array([w,h]))
-                        if dist > maxDist:
-                            subPix[w][h].append(outputImage[h][w]) #inverted image storage
-                            continue
-                         
-                        pxMovementMag = gain * normalPDF(normSigma, normMu, dist)
-                        pxMovement = oVector * np.array([pxMovementMag, pxMovementMag])
-                        dest = np.array([w,h]) + pxMovement
-                        
- 
-                        if 0 <= dest[0] < outputFrameDimensions[0] and 0 <= dest[1] < outputFrameDimensions[1]: 
-                            subPix[int(dest[0])][int(dest[1])].append(np.uint32(outputImage[h][w])) #inverted image storage
-                     
-                #flatten output image
+                PX_GAIN = 500
+                NORM_PX_SIGMA = 15
+                NORM_PX_MU = 0
+
+                T_GAIN = 20000
+                NORM_T_SIGMA = 15
+                NORM_T_MU = 0
+
+                destPix = outputImage.copy() * 0
+
+                #Flatten subPixels for the frame coming out of the queue
                 for w in xrange(outputFrameDimensions[0]):
                     for h in xrange(outputFrameDimensions[1]):
-                        a = subPix[w][h]
-                        
+                        a = subPix[0][w][h]
+            
                         if len(a) > 0:
                             destPix[h][w] = np.uint8(reduce(lambda x, y: x + y, a) / len(a))
-                                    
-                #fill in the blanks in the image
-                #obtain value from neighboring pixels
-                
+
+                #Fill in the blanks in the image we've created. Obtain value from neighboring x,y pixels
                 for w in xrange(outputFrameDimensions[0]):
                     for h in xrange(outputFrameDimensions[1]):
                         total = 0
                         count = 0
-                        if len(subPix[w][h]) == 0:
+                        if len(subPix[0][w][h]) == 0:
                             for w1 in xrange(w-3, w+4):
                                 for h1 in xrange(h-3, h+4):
-                                    if 0 <= w1 < outputFrameDimensions[0] and 0 <= h1 < outputFrameDimensions[1] and len(subPix[w1][h1]) != 0:
+                                    if 0 <= w1 < outputFrameDimensions[0] and 0 <= h1 < outputFrameDimensions[1] and len(subPix[0][w1][h1]) != 0:
                                         count = count + 1
                                         total += destPix[h1][w1]
                             avg = (total / count) if count > 0 else 0
                             destPix[h][w] = np.uint8(avg)
+
+                #we're done with the subPix frame exiting the queue
+                del(subPix[0])
+
+                #shift the subPix frames to the left
+                subPix.append([[[] for h in xrange(outputFrameDimensions[1])] for w in xrange(outputFrameDimensions[0])])
+
+                #we're not ready to handle the new frame
+
+                #Remove old singularities that can't apply anymore
+                singularities = [x for x in singularities if (i - x['start']) <= TEMPORAL_LEN]
+
+                #Perhaps add a new singularity
+                if random.randint(0, 100) < 5: #% probability of adding a new singularity to any given frame
+                    #TODO: attach a varying gain to t and (x,y) to each singularity
+                    #select a random point in (x,y) space (the origin of the singularity) and a unit vector in (t,x,y) space describing its effect
+                    oPoint = np.array([random.randint(0,outputFrameDimensions[0]), random.randint(0,outputFrameDimensions[1])])
+                    oVector = np.array([random.randint(-TEMPORAL_LEN, TEMPORAL_LEN), random.randint(0,outputFrameDimensions[0]), random.randint(0,outputFrameDimensions[1])])
+                    #print('Singularity is {} with direction {}'.format(oPoint, oVector))
+                    oVector = np.divide(oVector, np.linalg.norm(oVector)) #make it a unit vector
+                    #print('Singularity is {} with direction {}'.format(oPoint, oVector))
+                    singularities.append({'start': i, 'oPoint': oPoint, 'oVector': oVector})
+                    
+                #Calculate pixel movements for all pixels in range of all active singularities
+                #Each singularities affects each pixel in the image independently
+                if len(singularities) == 0:
+                    #put everything in the middle of the buffer; no anomalities to push the pixels around
+                    ttgt = TEMPORAL_LEN
+                    xtgt = w
+                    ytgt = h
+                    for w in xrange(outputFrameDimensions[0]):
+                        for h in xrange(outputFrameDimensions[1]):
+                            subPix[ttgt][xtgt][ytgt].append(np.uint32(outputImage[h][w])) #inverted image storage
+                else:
+                    for singularity in singularities:
+                        singStart = singularity['start']
+                        singOPoint = singularity['oPoint']
+                        singOVector = singularity['oVector'] #t,x,y
+                
+                        cv2.circle(destPix, tuple(singOPoint), 6, (255,255,255)) #show singularities
+                        cv2.waitKey(1)
+    
+                        for w in xrange(outputFrameDimensions[0]):
+                            for h in xrange(outputFrameDimensions[1]):
+                                dist = np.linalg.norm([singStart-i, singOPoint[0]-w, singOPoint[1]-h])
+    
+                                pxMovementMag = PX_GAIN * normalPDF(NORM_PX_SIGMA, NORM_PX_MU, dist)
+                                tMovementMag = T_GAIN * normalPDF(NORM_T_SIGMA, NORM_T_MU, dist)
+    
+                                movement = np.array([int(tMovementMag*singOVector[0]), int(pxMovementMag*singOVector[1]), int(pxMovementMag*singOVector[2])]) #t,x,y
+    
+                                xyDest = np.array([w,h]) + movement[1:]
+                                #print('Pixel {} is moved by {} to {}'.format([w,h], movement, xyDest))
                                 
-                                    
-                                
-                                    
-                                    
- 
+                                ttgt = TEMPORAL_LEN+movement[0]
+                                xtgt = xyDest[0]
+                                ytgt = xyDest[1]
+                                if 0 <= ttgt <= 2*TEMPORAL_LEN and 0 <= xtgt < outputFrameDimensions[0] and 0 <= ytgt < outputFrameDimensions[1]: 
+                                    subPix[ttgt][xtgt][ytgt].append(np.uint32(outputImage[h][w])) #inverted image storage
+                                else:
+                                    #print('pixel out of the frame {} {} {}'.format(ttgt, xtgt, ytgt))
+                                    pass
+
                 outputImage = destPix
-                #cv2.circle(outputImage, tuple(oPoint), 5, 255)
 
         #
         keptFrame = random.randint(0, 100) >= dropped_frame_factor
@@ -268,6 +308,8 @@ def main():
 
             if args.video_output:
                 sink.write(modifiedImage)
+        
+        sys.stderr.write('Progress: %.3f %%            \r' % (i*100./NB_FRAMES))
 
 
         k = cv2.waitKey(1)
