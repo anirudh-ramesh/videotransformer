@@ -37,37 +37,37 @@ def main():
     try:
         outputFrameDimensions = args.resize.split('x')
         outputFrameDimensions = [int(i) for i in outputFrameDimensions]
-        
+
     except ValueError:
         outputFrameDimensions = [0,0]
 
-        
+
     try:
         noise_gaussian = args.noise_gaussian.split(',')
         noise_gaussian = [int(i) for i in noise_gaussian]
     except ValueError:
         noise_gaussian = (0.,0.)
-        
+
     try:
         noise_saltpepper = args.noise_saltpepper.split(',')
         noise_saltpepper = [int(i) for i in noise_saltpepper]
     except ValueError:
         noise_saltpepper = (0.,0.)
-        
+
     try:
         channel_inversions  = args.invert_channels.split(',')
         channel_inversions = [i == 'y' for i in channel_inversions]
     except ValueError:
         channel_inversions = [False, False, False]
-        
+
     dropped_frame_factor = args.rand_frame_drop
     if not 0 < args.rand_frame_drop <= 100:
         dropped_frame_factor = 0
-    
+
     if args.smudge and not args.grey:
         sys.stderr.write("ERROR: --smudge can only be used in combination with --grey\n")
         exit(1)
-        
+
     if args.reverse and args.seek:
         sys.stderr.write("ERROR: --reverse is incompatible with --seek at this time\n")
         exit(1)
@@ -83,7 +83,7 @@ def main():
     INPUT_FRAME_WIDTH = int(cap.get(cv2.cv.CV_CAP_PROP_FRAME_WIDTH))
     INPUT_FRAME_HEIGHT = int(cap.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT))
     sys.stderr.write('In: fps={} frames={} {}x{}\n'.format(FPS, NB_FRAMES, INPUT_FRAME_WIDTH, INPUT_FRAME_HEIGHT))
-    
+
     if 0 <= args.seek < NB_FRAMES:
         cap.set(cv2.cv.CV_CAP_PROP_POS_FRAMES, args.seek)
     else:
@@ -97,6 +97,7 @@ def main():
         sys.stderr.write("Video doesn't appear to be supported.\n")
         exit(1)
 
+    sink = None
     if args.video_output:
         sink = cv2.VideoWriter(args.video_output, cv2.cv.FOURCC('M', 'J', 'P', 'G'), FPS, (outputFrameDimensions[0],outputFrameDimensions[1]), isColor=not args.grey)
         if not sink.isOpened():
@@ -112,7 +113,7 @@ def main():
     TEMPORAL_LEN = 25
     subPix = [[[[] for h in xrange(outputFrameDimensions[1])] for w in xrange(outputFrameDimensions[0])] for t in xrange(-TEMPORAL_LEN, TEMPORAL_LEN+1)]
     singularities = []
-    
+
     for i in xrange(NB_FRAMES):
         keptFrame = True
 
@@ -122,7 +123,7 @@ def main():
 
         if args.reverse:
             cap.set(cv2.cv.CV_CAP_PROP_POS_FRAMES, NB_FRAMES-i-1)
-        
+
         (ret,inputImage) = cap.read()
         if not ret:
             sys.stderr.write("Couldn't decode frame.\n")
@@ -156,7 +157,7 @@ def main():
             chans[1] = cv2.add(chans[1], noiseImage)
             chans[2] = cv2.add(chans[2], noiseImage)
             outputImage = cv2.merge(chans)
-        
+
         #
         if noise_saltpepper[0] and noise_saltpepper[1]:
             chans = cv2.split(outputImage)
@@ -175,11 +176,11 @@ def main():
             chans[2] = cv2.subtract(chans[2], black)
             chans[2] = cv2.add(chans[2], white)
             outputImage = cv2.merge(chans)
-        
+
         #
         if any(channel_inversions):
             chans = cv2.split(outputImage)
-            
+
             #data is stored BGR
             if channel_inversions[2]:
                 chans[0] = 255 - chans[0]
@@ -193,7 +194,7 @@ def main():
         destPix = None
         if args.grey:
             outputImage = cv2.cvtColor(outputImage, cv2.cv.CV_BGR2GRAY)
-            
+
             if args.smudge:
                 PX_GAIN = 500
                 NORM_PX_SIGMA = 15
@@ -209,7 +210,7 @@ def main():
                 for w in xrange(outputFrameDimensions[0]):
                     for h in xrange(outputFrameDimensions[1]):
                         a = subPix[0][w][h]
-            
+
                         if len(a) > 0:
                             destPix[h][w] = np.uint8(reduce(lambda x, y: x + y, a) / len(a))
 
@@ -248,7 +249,7 @@ def main():
                     oVector = np.divide(oVector, np.linalg.norm(oVector)) #make it a unit vector
                     #print('Singularity is {} with direction {}'.format(oPoint, oVector))
                     singularities.append({'start': i, 'oPoint': oPoint, 'oVector': oVector})
-                    
+
                 #Calculate pixel movements for all pixels in range of all active singularities
                 #Each singularities affects each pixel in the image independently
                 if len(singularities) == 0:
@@ -264,22 +265,22 @@ def main():
                         singStart = singularity['start']
                         singOPoint = singularity['oPoint']
                         singOVector = singularity['oVector'] #t,x,y
-                
+
                         cv2.circle(destPix, tuple(singOPoint), 6, (255,255,255)) #show singularities
                         cv2.waitKey(1)
-    
+
                         for w in xrange(outputFrameDimensions[0]):
                             for h in xrange(outputFrameDimensions[1]):
                                 dist = np.linalg.norm([singStart-i, singOPoint[0]-w, singOPoint[1]-h])
-    
+
                                 pxMovementMag = PX_GAIN * normalPDF(NORM_PX_SIGMA, NORM_PX_MU, dist)
                                 tMovementMag = T_GAIN * normalPDF(NORM_T_SIGMA, NORM_T_MU, dist)
-    
+
                                 movement = np.array([int(tMovementMag*singOVector[0]), int(pxMovementMag*singOVector[1]), int(pxMovementMag*singOVector[2])]) #t,x,y
-    
+
                                 xyDest = np.array([w,h]) + movement[1:]
                                 #print('Pixel {} is moved by {} to {}'.format([w,h], movement, xyDest))
-                                
+
                                 ttgt = TEMPORAL_LEN+movement[0]
                                 xtgt = xyDest[0]
                                 ytgt = xyDest[1]
@@ -308,7 +309,7 @@ def main():
 
             if args.video_output:
                 sink.write(modifiedImage)
-        
+
         sys.stderr.write('Progress: %.3f %%            \r' % (i*100./NB_FRAMES))
 
 
@@ -320,7 +321,8 @@ def main():
             sys.stderr.write('Unhandled key: {}\n'.format(k))
 
     cap.release()
-    sink.release()
+    if sink:
+        sink.release()
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
