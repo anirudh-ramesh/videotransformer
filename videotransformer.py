@@ -25,7 +25,7 @@ def main():
     parser.add_argument('--mirrorh', action='store_true', help='Mirror image horizontally')
     parser.add_argument('--mirrorv', action='store_true', help='Mirror image vertically')
     parser.add_argument('--noise-gaussian', default='0,0', metavar='M,D', help='Add gaussian noise (mean, stdev)')
-    parser.add_argument('--noise-saltpepper', default='0,0', metavar='LT,HT', help='Add gaussian noise (low thresh, high thresh)')
+    parser.add_argument('--noise-saltpepper', default='0,0', metavar='SPCT,PPCT', help='Add salt&pepper noise (salt %, pepper %)')
     parser.add_argument('--invert-channels', default='n,n,n', metavar='?,?,?', help='Invert channel RGB (y/n)')
     parser.add_argument('--speedup', type=int, default=1, choices=xrange(1,5), help='Speed-up playback (integer factor)')
     parser.add_argument('--rand-frame-drop', type=int, default=0, metavar='PCT', help='Drop frames randomly (uniform(0,100) < PCT)')
@@ -159,21 +159,27 @@ def main():
             outputImage = cv2.merge(chans)
 
         #
-        if noise_saltpepper[0] and noise_saltpepper[1]:
+        if noise_saltpepper[0] or noise_saltpepper[1]:
             chans = cv2.split(outputImage)
-            noiseImage = chans[0].copy()
-            cv2.randu(noiseImage, 0, 255)
-            black = noiseImage < noise_saltpepper[0]
-            black = black * 255
+            
+            whiteNoiseImage = chans[0].copy()
+            cv2.randu(whiteNoiseImage, 0, 100)
+            white = whiteNoiseImage < noise_saltpepper[0]
+            white = white.astype(np.uint8)
+            white *= 255
+
+            blackNoiseImage = chans[0].copy()
+            cv2.randu(blackNoiseImage, 0, 100)
+            black = blackNoiseImage < noise_saltpepper[1]
             black = black.astype(np.uint8)
-            white = noiseImage > noise_saltpepper[1]
-            white = white * 255
-            white = black.astype(np.uint8)
-            chans[0] = cv2.subtract(chans[0], black)
+            black *= 255
+            black = cv2.bitwise_not(black) #we want all 0's
+
+            chans[0] = cv2.bitwise_and(chans[0], black)
             chans[0] = cv2.add(chans[0], white)
-            chans[1] = cv2.subtract(chans[1], black)
+            chans[1] = cv2.bitwise_and(chans[1], black)
             chans[1] = cv2.add(chans[1], white)
-            chans[2] = cv2.subtract(chans[2], black)
+            chans[2] = cv2.bitwise_and(chans[2], black)
             chans[2] = cv2.add(chans[2], white)
             outputImage = cv2.merge(chans)
 
