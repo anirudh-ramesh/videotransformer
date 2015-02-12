@@ -5,7 +5,7 @@ import sys
 import argparse
 import random
 import numpy as np
-
+import math
 
 def nop(*args):
     pass
@@ -15,8 +15,8 @@ def normalPDF(sigma, mu, x):
 
 def main():
     parser = argparse.ArgumentParser(description='Process video files')
-    parser.add_argument('video_input', help='Input video file')
-    parser.add_argument('--video-output',  default='', help='Output video file')
+    parser.add_argument('input', help='Input video file')
+    parser.add_argument('--output',  default='', help='Output video file')
     parser.add_argument('--seek',  type=int, default=0, help='Start at specific frame')
     parser.add_argument('--batch',  action='store_true', help='Do not show GUI')
     parser.add_argument('--resize', default='0x0', help='WxH')
@@ -24,12 +24,12 @@ def main():
     parser.add_argument('--grey', action='store_true', help='Convert to greyscale')
     parser.add_argument('--mirrorh', action='store_true', help='Mirror image horizontally')
     parser.add_argument('--mirrorv', action='store_true', help='Mirror image vertically')
-    parser.add_argument('--noise-gaussian', default='0,0', metavar='M,D', help='Add gaussian noise (mean, stdev)')
+    parser.add_argument('--noise-gaussian', default='0', metavar='sigma', help='Add gaussian noise (sigma)')
     parser.add_argument('--noise-saltpepper', default='0,0', metavar='SPCT,PPCT', help='Add salt-pepper noise (salt pct, pepper pct)')
     parser.add_argument('--invert-channels', default='n,n,n', metavar='?,?,?', help='Invert channel RGB (y/n)')
     parser.add_argument('--speedup', type=int, default=1, choices=xrange(1,5), help='Speed-up playback (integer factor)')
     parser.add_argument('--rand-frame-drop', type=int, default=0, metavar='PCT', help='Drop frames randomly (uniform(0,100) < PCT)')
-    parser.add_argument('--smudge', action='store_true', help='Activate smudge generation')
+    parser.add_argument('--smudge', default='0,0,0,0', metavar='pctNewSing,sigN,sigT,sigPxDispl', help='Activate smudge generation (pctNewSing,sigmaNeigh,sigmaTime,sigmaPxDispl)')
     args = parser.parse_args()
     print repr(args)
 
@@ -43,10 +43,10 @@ def main():
 
 
     try:
-        noise_gaussian = args.noise_gaussian.split(',')
-        noise_gaussian = [int(i) for i in noise_gaussian]
+        noise_gaussian_sigma = args.noise_gaussian.split(',')
+        noise_gaussian_sigma = [int(i) for i in noise_gaussian_sigma]
     except ValueError:
-        noise_gaussian = (0.,0.)
+        noise_gaussian_sigma = 0.
 
     try:
         noise_saltpepper = args.noise_saltpepper.split(',')
@@ -63,8 +63,15 @@ def main():
     dropped_frame_factor = args.rand_frame_drop
     if not 0 < args.rand_frame_drop <= 100:
         dropped_frame_factor = 0
+        
+    try:
+        smudge = args.smudge.split(',')
+        smudge = [float(i) for i in smudge]
+        smudge = {'pctNewSing': smudge[0], 'sigma_neigh': smudge[1], 'sigma_time': smudge[2], 'sigma_px_displ': smudge[3]}
+    except ValueError:
+        smudge = {'pctNewSing': 0, 'sigma_neigh': 0., 'sigma_time': 0., 'sigma_px_displ': 0.}
 
-    if args.smudge and not args.grey:
+    if any(smudge.keys()) and not args.grey:
         sys.stderr.write("ERROR: --smudge can only be used in combination with --grey\n")
         exit(1)
 
@@ -73,7 +80,7 @@ def main():
         exit(1)
     ###########################
 
-    cap = cv2.VideoCapture(args.video_input)
+    cap = cv2.VideoCapture(args.input)
     if not cap.isOpened():
         sys.stderr.write("Couldn't open video file.\n")
         exit(1)
@@ -98,8 +105,8 @@ def main():
         exit(1)
 
     sink = None
-    if args.video_output:
-        sink = cv2.VideoWriter(args.video_output, cv2.cv.FOURCC('M', 'J', 'P', 'G'), FPS, (outputFrameDimensions[0],outputFrameDimensions[1]), isColor=not args.grey)
+    if args.output:
+        sink = cv2.VideoWriter(args.output, cv2.cv.FOURCC('M', 'J', 'P', 'G'), FPS, (outputFrameDimensions[0],outputFrameDimensions[1]), isColor=not args.grey)
         if not sink.isOpened():
             sys.stderr.write("Couldn't open output video file.\n")
             exit(1)
@@ -110,8 +117,6 @@ def main():
         cv2.createTrackbar('Progress', 'Original', 0, NB_FRAMES, nop)
         cv2.createTrackbar('Progress', 'Modified', 0, NB_FRAMES, nop)
 
-    TEMPORAL_LEN = 25
-    subPix = [[[[] for h in xrange(outputFrameDimensions[1])] for w in xrange(outputFrameDimensions[0])] for t in xrange(-TEMPORAL_LEN, TEMPORAL_LEN+1)]
     singularities = []
 
     for i in xrange(NB_FRAMES):
@@ -149,10 +154,10 @@ def main():
             outputImage = cv2.flip(outputImage, 0)
 
         #
-        if noise_gaussian[0] and noise_gaussian[1]:
+        if noise_gaussian_sigma[0] and noise_gaussian_sigma[1]:
             chans = cv2.split(outputImage)
             noiseImage = chans[0].copy()
-            cv2.randn(noiseImage, noise_gaussian[0], noise_gaussian[1])
+            cv2.randn(noiseImage, noise_gaussian_sigma[0], noise_gaussian_sigma[1])
             chans[0] = cv2.add(chans[0], noiseImage)
             chans[1] = cv2.add(chans[1], noiseImage)
             chans[2] = cv2.add(chans[2], noiseImage)
@@ -202,101 +207,81 @@ def main():
             outputImage = cv2.cvtColor(outputImage, cv2.cv.CV_BGR2GRAY)
 
             if args.smudge:
-                PX_GAIN = 500
-                NORM_PX_SIGMA = 15
-                NORM_PX_MU = 0
+                MAX_SINGULARITY_DURATION = 3 * smudge['sigma_time'] #99% of the effect is captured in this range
 
-                T_GAIN = 20000
-                NORM_T_SIGMA = 15
-                NORM_T_MU = 0
-
+                subPixels = [[[] for h in xrange(outputFrameDimensions[1])] for w in xrange(outputFrameDimensions[0])]
                 destPix = outputImage.copy() * 0
 
-                #Flatten subPixels for the frame coming out of the queue
-                for w in xrange(outputFrameDimensions[0]):
-                    for h in xrange(outputFrameDimensions[1]):
-                        a = subPix[0][w][h]
-
-                        if len(a) > 0:
-                            destPix[h][w] = np.uint8(reduce(lambda x, y: x + y, a) / len(a))
-
-                #Fill in the blanks in the image we've created. Obtain value from neighboring x,y pixels
-                for w in xrange(outputFrameDimensions[0]):
-                    for h in xrange(outputFrameDimensions[1]):
-                        total = 0
-                        count = 0
-                        if len(subPix[0][w][h]) == 0:
-                            for w1 in xrange(w-3, w+4):
-                                for h1 in xrange(h-3, h+4):
-                                    if 0 <= w1 < outputFrameDimensions[0] and 0 <= h1 < outputFrameDimensions[1] and len(subPix[0][w1][h1]) != 0:
-                                        count = count + 1
-                                        total += destPix[h1][w1]
-                            avg = (total / count) if count > 0 else 0
-                            destPix[h][w] = np.uint8(avg)
-
-                #we're done with the subPix frame exiting the queue
-                del(subPix[0])
-
-                #shift the subPix frames to the left
-                subPix.append([[[] for h in xrange(outputFrameDimensions[1])] for w in xrange(outputFrameDimensions[0])])
-
-                #we're not ready to handle the new frame
-
                 #Remove old singularities that can't apply anymore
-                singularities = [x for x in singularities if (i - x['start']) <= TEMPORAL_LEN]
+                singularities = [x for x in singularities if (i - x['start']) <= MAX_SINGULARITY_DURATION]
 
                 #Perhaps add a new singularity
-                if random.randint(0, 100) < 5: #% probability of adding a new singularity to any given frame
-                    #TODO: attach a varying gain to t and (x,y) to each singularity
+                if random.randint(0, 100) < smudge['pctNewSing']: #% probability of adding a new singularity to any given frame
                     #select a random point in (x,y) space (the origin of the singularity) and a unit vector in (t,x,y) space describing its effect
-                    oPoint = np.array([random.randint(0,outputFrameDimensions[0]), random.randint(0,outputFrameDimensions[1])])
-                    oVector = np.array([random.randint(-TEMPORAL_LEN, TEMPORAL_LEN), random.randint(0,outputFrameDimensions[0]), random.randint(0,outputFrameDimensions[1])])
-                    #print('Singularity is {} with direction {}'.format(oPoint, oVector))
-                    oVector = np.divide(oVector, np.linalg.norm(oVector)) #make it a unit vector
-                    #print('Singularity is {} with direction {}'.format(oPoint, oVector))
-                    singularities.append({'start': i, 'oPoint': oPoint, 'oVector': oVector})
+                    threePxDisplSigmas = 3*smudge['sigma_px_displ']
+                    #we don't want a point too close to an edge
+                    oPoint = np.array([random.randint(threePxDisplSigmas,outputFrameDimensions[0]-threePxDisplSigmas), \
+                                       random.randint(threePxDisplSigmas,outputFrameDimensions[1]-threePxDisplSigmas)])
 
-                #Calculate pixel movements for all pixels in range of all active singularities
-                #Each singularities affects each pixel in the image independently
+                    oVector = np.array([random.randint(0,outputFrameDimensions[0]), random.randint(0,outputFrameDimensions[1])])
+                    oVector = np.divide(oVector, np.linalg.norm(oVector)) #make it a unit vector
+                    oStart = i + 10 # anomaly can't start right away otherwise it will create a sudden effect, push it in the future
+                    singularities.append({'start': oStart, 'oPoint': oPoint, 'oVector': oVector})
+
+                
                 if len(singularities) == 0:
-                    #put everything in the middle of the buffer; no anomalities to push the pixels around
-                    ttgt = TEMPORAL_LEN
-                    xtgt = w
-                    ytgt = h
+                    destPix = outputImage
+                #Calculate pixel movements for all pixels in range of all active singularities
+                else:
                     for w in xrange(outputFrameDimensions[0]):
                         for h in xrange(outputFrameDimensions[1]):
-                            subPix[ttgt][xtgt][ytgt].append(np.uint32(outputImage[h][w])) #inverted image storage
-                else:
+                            movement = [0.,0.] #x,y
+                            for singularity in singularities:
+                                dist = np.linalg.norm([singularity['oPoint'] - [w,h]])
+
+                                distNormalAt0 = normalPDF(smudge['sigma_px_displ'], 0, 0)
+                                distNormalAtDist = normalPDF(smudge['sigma_px_displ'], 0, dist)
+                                timeNormalAt0 = normalPDF(smudge['sigma_time'], 0, 0)
+                                timeNormalAtDist = normalPDF(smudge['sigma_time'], 0, abs(i-singularity['start']))
+                                pxMovementMag = ((distNormalAtDist / distNormalAt0) * smudge['sigma_px_displ']) * (timeNormalAtDist / timeNormalAt0)
+
+                                movement += np.array([pxMovementMag*singularity['oVector'][0], pxMovementMag*singularity['oVector'][1]]) #x,y
+
+                            xyDest = [w,h] + movement
+                            
+                            if 0 <= xyDest[0] <= outputFrameDimensions[0]-1 and 0 <= xyDest[1] <= outputFrameDimensions[1]-1: 
+                                subPixels[int(xyDest[0])][int(xyDest[1])].append([xyDest[0], xyDest[1], np.uint32(outputImage[h][w])]) #[h][w] because of inverted image storage
+                
+                    MAX_NEIGHBORHOOD_DIST = int(math.ceil(3 * smudge['sigma_neigh']))
+                    for w in xrange(outputFrameDimensions[0]):
+                        for h in xrange(outputFrameDimensions[1]):
+                            cumulWeight = 0.
+                            cumulWeighedIntens = 0.
+                            for wn in xrange(w-MAX_NEIGHBORHOOD_DIST, w+MAX_NEIGHBORHOOD_DIST+1):
+                                for hn in xrange(h-MAX_NEIGHBORHOOD_DIST, h+MAX_NEIGHBORHOOD_DIST+1):
+                                    if not(0 <= wn < outputFrameDimensions[0] and 0 <= hn < outputFrameDimensions[1]):
+                                        continue
+    
+                                    for subpx in subPixels[wn][hn]:
+                                        fractW = subpx[0]
+                                        fractH = subpx[1]
+                                        intens = subpx[2]
+    
+                                        dist = np.linalg.norm(np.array([w,h]) - [fractW,fractH])
+                                        #neighNormalAt0 = normalPDF(smudge['sigma_neigh'], 0, 0)
+                                        neighNormalAtDist = normalPDF(smudge['sigma_neigh'], 0, dist)
+                                        cumulWeighedIntens += intens * neighNormalAtDist
+                                        cumulWeight += neighNormalAtDist
+    
+                            if cumulWeight > 0:
+                                destPix[h][w] = np.uint8(cumulWeighedIntens/cumulWeight)
+
+                    #show a circle for each singularity
                     for singularity in singularities:
-                        singStart = singularity['start']
-                        singOPoint = singularity['oPoint']
-                        singOVector = singularity['oVector'] #t,x,y
-
-                        cv2.circle(destPix, tuple(singOPoint), 6, (255,255,255)) #show singularities
-                        cv2.waitKey(1)
-
-                        for w in xrange(outputFrameDimensions[0]):
-                            for h in xrange(outputFrameDimensions[1]):
-                                dist = np.linalg.norm([singStart-i, singOPoint[0]-w, singOPoint[1]-h])
-
-                                pxMovementMag = PX_GAIN * normalPDF(NORM_PX_SIGMA, NORM_PX_MU, dist)
-                                tMovementMag = T_GAIN * normalPDF(NORM_T_SIGMA, NORM_T_MU, dist)
-
-                                movement = np.array([int(tMovementMag*singOVector[0]), int(pxMovementMag*singOVector[1]), int(pxMovementMag*singOVector[2])]) #t,x,y
-
-                                xyDest = np.array([w,h]) + movement[1:]
-                                #print('Pixel {} is moved by {} to {}'.format([w,h], movement, xyDest))
-
-                                ttgt = TEMPORAL_LEN+movement[0]
-                                xtgt = xyDest[0]
-                                ytgt = xyDest[1]
-                                if 0 <= ttgt <= 2*TEMPORAL_LEN and 0 <= xtgt < outputFrameDimensions[0] and 0 <= ytgt < outputFrameDimensions[1]: 
-                                    subPix[ttgt][xtgt][ytgt].append(np.uint32(outputImage[h][w])) #inverted image storage
-                                else:
-                                    #print('pixel out of the frame {} {} {}'.format(ttgt, xtgt, ytgt))
-                                    pass
+                        cv2.circle(destPix, tuple(singularity['oPoint']), 3, (255,255,255)) #show singularities
 
                 outputImage = destPix
+                cv2.waitKey(1)
 
         #
         keptFrame = random.randint(0, 100) >= dropped_frame_factor
@@ -313,7 +298,7 @@ def main():
             if not args.batch:
                 cv2.imshow('Modified', outputImage)
 
-            if args.video_output:
+            if args.output:
                 sink.write(modifiedImage)
 
         sys.stderr.write('Progress: %.3f %%            \r' % (i*100./NB_FRAMES))
