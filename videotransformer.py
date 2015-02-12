@@ -25,7 +25,7 @@ def main():
     parser.add_argument('--mirrorh', action='store_true', help='Mirror image horizontally')
     parser.add_argument('--mirrorv', action='store_true', help='Mirror image vertically')
     parser.add_argument('--noise-gaussian', default='0,0', metavar='M,D', help='Add gaussian noise (mean, stdev)')
-    parser.add_argument('--noise-saltpepper', default='0,0', metavar='SPCT,PPCT', help='Add salt&pepper noise (salt %, pepper %)')
+    parser.add_argument('--noise-saltpepper', default='0,0', metavar='SPCT,PPCT', help='Add salt-pepper noise (salt pct, pepper pct)')
     parser.add_argument('--invert-channels', default='n,n,n', metavar='?,?,?', help='Invert channel RGB (y/n)')
     parser.add_argument('--speedup', type=int, default=1, choices=xrange(1,5), help='Speed-up playback (integer factor)')
     parser.add_argument('--rand-frame-drop', type=int, default=0, metavar='PCT', help='Drop frames randomly (uniform(0,100) < PCT)')
