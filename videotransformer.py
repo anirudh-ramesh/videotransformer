@@ -302,7 +302,8 @@ def main():
             if args.output:
                 sink.write(modifiedImage)
 
-        sys.stderr.write('Progress: %.3f %%            \r' % (i*100./NB_FRAMES))
+        if not args.batch:
+            sys.stderr.write('Progress: %.3f %%            \r' % (i*100./NB_FRAMES))
 
 
         k = cv2.waitKey(1)
