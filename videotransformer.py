@@ -207,7 +207,7 @@ def main():
             outputImage = cv2.cvtColor(outputImage, cv2.cv.CV_BGR2GRAY)
 
             if args.smudge:
-                MAX_SINGULARITY_DURATION = 3 * smudge['sigma_time'] #99% of the effect is captured in this range
+                MAX_SINGULARITY_DURATION = int(3 * smudge['sigma_time']) #99% of the effect is captured in this range
 
                 subPixels = [[[] for h in xrange(outputFrameDimensions[1])] for w in xrange(outputFrameDimensions[0])]
                 destPix = outputImage.copy() * 0
@@ -225,7 +225,7 @@ def main():
 
                     oVector = np.array([random.randint(0,outputFrameDimensions[0]), random.randint(0,outputFrameDimensions[1])])
                     oVector = np.divide(oVector, np.linalg.norm(oVector)) #make it a unit vector
-                    oStart = i + 10 # anomaly can't start right away otherwise it will create a sudden effect, push it in the future
+                    oStart = i + MAX_SINGULARITY_DURATION # anomaly can't start right away otherwise it will create a sudden effect, push it in the future
                     singularities.append({'start': oStart, 'oPoint': oPoint, 'oVector': oVector})
 
                 
@@ -277,8 +277,9 @@ def main():
                                 destPix[h][w] = np.uint8(cumulWeighedIntens/cumulWeight)
 
                     #show a circle for each singularity
-                    for singularity in singularities:
-                        cv2.circle(destPix, tuple(singularity['oPoint']), 3, (255,255,255)) #show singularities
+                    if not args.batch:
+                        for singularity in singularities:
+                            cv2.circle(destPix, tuple(singularity['oPoint']), 3, (255,255,255)) #show singularities
 
                 outputImage = destPix
                 cv2.waitKey(1)
