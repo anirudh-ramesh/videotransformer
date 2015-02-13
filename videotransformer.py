@@ -71,7 +71,7 @@ def main():
     except ValueError:
         smudge = {'pctNewSing': 0, 'sigma_neigh': 0., 'sigma_time': 0., 'sigma_px_displ': 0.}
 
-    if any(smudge.keys()) and not args.grey:
+    if any(smudge.values()) and not args.grey:
         sys.stderr.write("ERROR: --smudge can only be used in combination with --grey\n")
         exit(1)
 
