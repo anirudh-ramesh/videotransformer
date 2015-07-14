@@ -30,6 +30,11 @@ def main():
     parser.add_argument('--speedup', type=int, default=1, choices=xrange(1,5), help='Speed-up playback (integer factor)')
     parser.add_argument('--rand-frame-drop', type=int, default=0, metavar='PCT', help='Drop frames randomly (uniform(0,100) < PCT)')
     parser.add_argument('--smudge', default='0,0,0,0', metavar='pctNewSing,sigN,sigT,sigPxDispl', help='Activate smudge generation (pctNewSing,sigmaNeigh,sigmaTime,sigmaPxDispl)')
+    # Add shear
+    parser.add_argument('--shear', type=int, default=0, choices=xrange(0,20), metavar='Angle', help='Shear image (angle)')
+    # Add stretch
+    parser.add_argument('--stretch', default='0x0', help='WxH')
+    #
     args = parser.parse_args()
     print repr(args)
 
@@ -37,11 +42,17 @@ def main():
     try:
         outputFrameDimensions = args.resize.split('x')
         outputFrameDimensions = [int(i) for i in outputFrameDimensions]
-
     except ValueError:
         outputFrameDimensions = [0,0]
 
-
+    # Add stretch
+    try:
+        outputFrameDimensions = args.stretch.split('x')
+        outputFrameDimensions = [int(i) for i in outputFrameDimensions]
+    except ValueError:
+        outputFrameDimensions = [0,0]
+    #
+    
     try:
         noise_gaussian_sigma = args.noise_gaussian.split(',')
         noise_gaussian_sigma = [int(i) for i in noise_gaussian_sigma]
@@ -96,6 +107,17 @@ def main():
     else:
         sys.stderr.write('Could not seek past end of video\n')
 
+    # Add shear (insert code away from rest since input frame dimensions are required)
+    try:
+        if args.shear:
+            shearAngle = args.shear
+            shearFactor = math.sin(args.shear*np.pi/180)
+            outputFrameDimensions[0] = int(INPUT_FRAME_WIDTH * (shearFactor + 1))
+            outputFrameDimensions[1] = INPUT_FRAME_HEIGHT
+    except ValueError:
+        outputFrameDimensions = [0,0]
+    #
+    
     outputFrameDimensions[0] = outputFrameDimensions[0] if outputFrameDimensions[0] > 0 else INPUT_FRAME_WIDTH
     outputFrameDimensions[1] = outputFrameDimensions[1] if outputFrameDimensions[1] > 0 else INPUT_FRAME_HEIGHT
     sys.stderr.write('Out: fps={} frames={} {}x{}\n'.format(FPS, NB_FRAMES, outputFrameDimensions[0], outputFrameDimensions[1]))
@@ -142,9 +164,26 @@ def main():
         outputImage = inputImage.copy()
 
         #
-        if INPUT_FRAME_WIDTH != outputFrameDimensions[0] or INPUT_FRAME_HEIGHT != outputFrameDimensions[1]:
+        # Modify resize
+        if args.resize and (INPUT_FRAME_WIDTH != outputFrameDimensions[0] or INPUT_FRAME_HEIGHT != outputFrameDimensions[1]):
             outputImage = cv2.resize(outputImage, tuple(outputFrameDimensions))
 
+        # Add shear
+        if args.shear:
+            rows, columns = outputImage.shape[:2]
+            sourceTriangle = np.array([(0,0),(columns-1,0),(0,rows-1)], np.float32)
+            destinationTriangle = np.array([(0,0),(columns-1,0), (columns*shearFactor,rows-1)],np.float32)
+            warpMatrix = cv2.getAffineTransform(sourceTriangle,destinationTriangle)
+            outputImage = cv2.warpAffine(outputImage,warpMatrix,(int(columns*shearFactor)+columns,rows))
+
+        # Add stretch
+        if args.stretch:
+            rows, columns = outputImage.shape[:2]
+            sourceTriangle = np.array([(0,0),(columns-1,0),(0,rows-1)], np.float32)
+            destinationTriangle = np.array([(0,0),(outputFrameDimensions[0]-1,0), (0,outputFrameDimensions[1]-1)],np.float32)
+            warpMatrix = cv2.getAffineTransform(sourceTriangle,destinationTriangle)
+            outputImage = cv2.warpAffine(outputImage,warpMatrix,tuple(outputFrameDimensions))
+        
         #
         if args.mirrorh and args.mirrorv:
             outputImage = cv2.flip(outputImage, -1)
