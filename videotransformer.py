@@ -31,10 +31,11 @@ def main():
     parser.add_argument('--rand-frame-drop', type=int, default=0, metavar='PCT', help='Drop frames randomly (uniform(0,100) < PCT)')
     parser.add_argument('--smudge', default='0,0,0,0', metavar='pctNewSing,sigN,sigT,sigPxDispl', help='Activate smudge generation (pctNewSing,sigmaNeigh,sigmaTime,sigmaPxDispl)')
     # Add shear
-    parser.add_argument('--shear', type=int, default=0, choices=xrange(0,20), metavar='Angle', help='Shear image (angle)')
+    parser.add_argument('--shear', type=int, default=0, choices=xrange(0,60), metavar='Angle', help='Shear image (angle)')
     # Add stretch
     parser.add_argument('--stretch', default='0x0', help='WxH')
-    #
+    # Add rotate
+    parser.add_argument('--rotate', type=int, default=0, choices=xrange(0,5), metavar='Angle', help='Rotate image (angle)')
     args = parser.parse_args()
     print repr(args)
 
@@ -111,11 +112,23 @@ def main():
     try:
         if args.shear:
             shearAngle = args.shear
-            shearFactor = math.sin(args.shear*np.pi/180)
+            shearFactor = math.sin(shearAngle*np.pi/180)
             outputFrameDimensions[0] = int(INPUT_FRAME_WIDTH * (shearFactor + 1))
             outputFrameDimensions[1] = INPUT_FRAME_HEIGHT
     except ValueError:
         outputFrameDimensions = [0,0]
+    
+    # Add rotate (insert code away from rest since input frame dimensions are required)
+    try:
+        if args.rotate:
+            rotateAngle = args.rotate
+            rotateFactor_sin = math.sin(rotateAngle*np.pi/180)
+            rotateFactor_cos = math.cos(rotateAngle*np.pi/180)
+            outputFrameDimensions[0] = int(INPUT_FRAME_WIDTH * rotateFactor_cos + INPUT_FRAME_HEIGHT * rotateFactor_sin)
+            outputFrameDimensions[1] = int(INPUT_FRAME_WIDTH * rotateFactor_sin + INPUT_FRAME_HEIGHT * rotateFactor_cos)
+    except ValueError:
+        outputFrameDimensions = [0,0]
+
     #
     
     outputFrameDimensions[0] = outputFrameDimensions[0] if outputFrameDimensions[0] > 0 else INPUT_FRAME_WIDTH
@@ -175,6 +188,14 @@ def main():
             destinationTriangle = np.array([(0,0),(columns-1,0), (columns*shearFactor,rows-1)],np.float32)
             warpMatrix = cv2.getAffineTransform(sourceTriangle,destinationTriangle)
             outputImage = cv2.warpAffine(outputImage,warpMatrix,(int(columns*shearFactor)+columns,rows))
+
+        # Add rotate
+        if args.rotate:
+            rows, columns = outputImage.shape[:2]
+            warpMatrix = np.float32([[1,0,(outputFrameDimensions[0]-columns)/2],[0,1,(outputFrameDimensions[1]-rows)/2]])
+            translated = cv2.warpAffine(outputImage,warpMatrix,tuple(outputFrameDimensions))
+            rotateMatrix = cv2.getRotationMatrix2D((outputFrameDimensions[0]/2,outputFrameDimensions[1]/2),rotateAngle,1)
+            outputImage = cv2.warpAffine(translated,rotateMatrix,tuple(outputFrameDimensions))
 
         # Add stretch
         if args.stretch:
