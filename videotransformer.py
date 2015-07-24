@@ -31,11 +31,11 @@ def main():
     parser.add_argument('--rand-frame-drop', type=int, default=0, metavar='PCT', help='Drop frames randomly (uniform(0,100) < PCT)')
     parser.add_argument('--smudge', default='0,0,0,0', metavar='pctNewSing,sigN,sigT,sigPxDispl', help='Activate smudge generation (pctNewSing,sigmaNeigh,sigmaTime,sigmaPxDispl)')
     # Add shear
-    parser.add_argument('--shear', type=int, default=0, choices=xrange(0,60), metavar='Angle', help='Shear image (angle)')
-    # Add stretch
-    parser.add_argument('--stretch', default='0x0', help='WxH')
+    parser.add_argument('--shear', type=int, default=0, choices=xrange(0,20), metavar='Angle', help='Shear image (angle)')
     # Add rotate
     parser.add_argument('--rotate', type=int, default=0, choices=xrange(0,5), metavar='Angle', help='Rotate image (angle)')
+    # Add stretch
+    parser.add_argument('--stretch', default='0x0', help='Stretch image (WxH Factor - 1)')
     args = parser.parse_args()
     print repr(args)
 
@@ -46,14 +46,6 @@ def main():
     except ValueError:
         outputFrameDimensions = [0,0]
 
-    # Add stretch
-    try:
-        outputFrameDimensions = args.stretch.split('x')
-        outputFrameDimensions = [int(i) for i in outputFrameDimensions]
-    except ValueError:
-        outputFrameDimensions = [0,0]
-    #
-    
     try:
         noise_gaussian_sigma = args.noise_gaussian.split(',')
         noise_gaussian_sigma = [int(i) for i in noise_gaussian_sigma]
@@ -108,6 +100,8 @@ def main():
     else:
         sys.stderr.write('Could not seek past end of video\n')
 
+    ###########################
+
     # Add shear (insert code away from rest since input frame dimensions are required)
     try:
         if args.shear:
@@ -129,8 +123,17 @@ def main():
     except ValueError:
         outputFrameDimensions = [0,0]
 
-    #
-    
+    # Add stretch (insert code away from rest since input frame dimensions are required)
+    try:
+        Factor = args.stretch.split('x')
+        Factor = [float(i) for i in Factor]
+        outputFrameDimensions[0] = int(INPUT_FRAME_WIDTH * (Factor[0]+1))
+        outputFrameDimensions[1] = int(INPUT_FRAME_HEIGHT * (Factor[1]+1))
+    except ValueError:
+        outputFrameDimensions = [0,0]
+        
+    ###########################
+
     outputFrameDimensions[0] = outputFrameDimensions[0] if outputFrameDimensions[0] > 0 else INPUT_FRAME_WIDTH
     outputFrameDimensions[1] = outputFrameDimensions[1] if outputFrameDimensions[1] > 0 else INPUT_FRAME_HEIGHT
     sys.stderr.write('Out: fps={} frames={} {}x{}\n'.format(FPS, NB_FRAMES, outputFrameDimensions[0], outputFrameDimensions[1]))
